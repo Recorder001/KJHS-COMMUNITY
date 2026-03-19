@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>공주고등학교 커뮤니티</title>
+</head>
+<body>
+
+  <!-- ========== 메인 뷰 ========== -->
+  <div id="main-view">
+    <h1>공주고등학교 커뮤니티</h1>
+    <hr>
+
+    <h2>글 작성</h2>
+
+    <label>
+      <input type="radio" name="post-type" value="general" checked onchange="switchPostType()"> 일반 글
+    </label>
+    &nbsp;
+    <label>
+      <input type="radio" name="post-type" value="thread" onchange="switchPostType()"> 스레드
+    </label>
+    <br><br>
+
+    <!-- 일반 글 폼 -->
+    <div id="form-general">
+      <textarea id="general-content" rows="5" cols="50" placeholder="내용 입력 후 Enter로 등록 / Shift+Enter로 줄바꿈"></textarea>
+      <br><br>
+      <button onclick="submitGeneral()">등록</button>
+    </div>
+
+    <!-- 스레드 폼 -->
+    <div id="form-thread" style="display:none;">
+      <input type="text" id="thread-title" size="50" placeholder="제목을 입력하세요"><br><br>
+      <textarea id="thread-content" rows="5" cols="50" placeholder="본문을 입력하세요 (Shift+Enter로 줄바꿈)"></textarea>
+      <br><br>
+      <button onclick="submitThread()">등록</button>
+    </div>
+
+    <hr>
+    <h2>게시글 목록</h2>
+    <div id="post-list"><p>불러오는 중...</p></div>
+  </div>
+
+  <!-- ========== 스레드 상세 뷰 ========== -->
+  <div id="thread-view" style="display:none;">
+    <button onclick="goBack()">← 목록으로</button>
+    <h1>공주고등학교 커뮤니티</h1>
+    <hr>
+    <h2 id="tv-title"></h2>
+    <p id="tv-time"></p>
+    <p id="tv-content"></p>
+    <hr>
+    <h3>댓글</h3>
+    <textarea id="tv-input" rows="3" cols="50" placeholder="댓글 입력 후 Enter / Shift+Enter로 줄바꿈"></textarea>
+    <br><br>
+    <button onclick="submitThreadComment()">댓글 등록</button>
+    <br><br>
+    <div id="tv-comments"></div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // ★ Firebase 콘솔에서 복사한 설정을 아래에 붙여넣으세요
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDCDjePP-Kv5G3_gW1hyQXzZ51zq93Ego",
+      authDomain: "kongjuhs-community.firebaseapp.com",
+      projectId: "kongjuhs-community",
+      storageBucket: "kongjuhs-community.firebasestorage.app",
+      messagingSenderId: "488164570766",
+      appId: "1:488164570766:web:c782162975119d2167bbdf"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    var db = firebase.firestore();
+
+    var posts = [];
+    var currentThreadId = null;
+
+    // ── Firestore 실시간 동기화 ────────────────────────
+    db.collection('posts').orderBy('createdAt', 'desc').onSnapshot(function(snapshot) {
+      posts = [];
+      snapshot.forEach(function(doc) {
+        posts.push(Object.assign({ id: doc.id }, doc.data()));
+      });
+      if (currentThreadId) {
+        renderThreadComments();
+      } else {
+        renderPosts();
+      }
+    });
+
+    function getPostById(id) {
+      for (var i = 0; i < posts.length; i++) {
+        if (posts[i].id === id) return posts[i];
+      }
+      return null;
+    }
+
+    function savePost(postId) {
+      var post = getPostById(postId);
+      if (!post) return;
+      var data = Object.assign({}, post);
+      delete data.id;
+      db.collection('posts').doc(postId).set(data);
+    }
+
+    // ── 타입 전환 ──────────────────────────────────────
+    function switchPostType() {
+      var type = document.querySelector('input[name="post-type"]:checked').value;
+      document.getElementById('form-general').style.display = type === 'general' ? 'block' : 'none';
+      document.getElementById('form-thread').style.display  = type === 'thread'  ? 'block' : 'none';
+    }
+
+    // ── 유틸 ───────────────────────────────────────────
+    function now() {
+      var d = new Date();
+      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+        + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+    function esc(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function nl2br(str) { return esc(str).replace(/\n/g,'<br>'); }
+
+    // ── Enter 등록 헬퍼 ────────────────────────────────
+    function onEnterSubmit(el, fn) {
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fn(); }
+      });
+    }
+
+    document.getElementById('general-content').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitGeneral(); }
+    });
+
+    // ── 일반 글 등록 ───────────────────────────────────
+    function submitGeneral() {
+      var ta = document.getElementById('general-content');
+      var text = ta.value.trim();
+      if (!text) return;
+      ta.value = '';
+      db.collection('posts').add({
+        type: 'general',
+        content: text,
+        time: now(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        replies: []
+      });
+    }
+
+    // ── 스레드 등록 ────────────────────────────────────
+    function submitThread() {
+      var title = document.getElementById('thread-title').value.trim();
+      var content = document.getElementById('thread-content').value.trim();
+      if (!title || !content) { alert('제목과 본문을 모두 입력해주세요.'); return; }
+      document.getElementById('thread-title').value = '';
+      document.getElementById('thread-content').value = '';
+      db.collection('posts').add({
+        type: 'thread',
+        title: title,
+        content: content,
+        time: now(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        comments: []
+      });
+    }
+
+    // ── 메인 목록 렌더링 ───────────────────────────────
+    function renderPosts() {
+      var list = document.getElementById('post-list');
+      if (posts.length === 0) { list.innerHTML = '<p>등록된 게시글이 없습니다.</p>'; return; }
+      var html = '';
+      for (var i = 0; i < posts.length; i++) {
+        var p = posts[i];
+        if (p.type === 'thread') {
+          html +=
+            '<div>' +
+            '<b>[스레드]</b> <a href="#" onclick="openThread(\'' + p.id + '\');return false;">' + esc(p.title) + '</a>' +
+            ' &nbsp;<small>' + p.time + ' · 댓글 ' + p.comments.length + '개</small>' +
+            '<hr></div>';
+        } else {
+          html += renderGeneralNode(p, p.id, 0) + '<hr>';
+        }
+      }
+      list.innerHTML = html;
+      attachAllReplyKeydowns(posts);
+    }
+
+    // ── 일반 글 노드 렌더링 (재귀) ─────────────────────
+    function renderGeneralNode(node, path, depth) {
+      var indent = depth * 16;
+      var border = depth > 0 ? 'border-left:2px solid #999; padding-left:8px;' : '';
+      var prefix = depth > 0 ? '↳ ' : '';
+      var repliesHtml = '';
+      for (var i = 0; i < node.replies.length; i++) {
+        repliesHtml += renderGeneralNode(node.replies[i], path + '.' + i, depth + 1);
+      }
+      return (
+        '<div style="margin-left:' + indent + 'px;' + border + '">' +
+        '<p style="margin:4px 0;">' + prefix + nl2br(node.content) + '</p>' +
+        '<small>' + node.time + '</small> &nbsp;' +
+        '<button onclick="toggleReplyBox(\'' + path + '\')">답글</button>' +
+        '<div id="reply-box-' + path + '" style="display:none;margin-top:4px;">' +
+        '<textarea id="reply-input-' + path + '" rows="2" cols="45" placeholder="답글 입력 후 Enter / Shift+Enter로 줄바꿈"></textarea><br>' +
+        '<button onclick="submitReply(\'' + path + '\')">등록</button>' +
+        '</div>' +
+        repliesHtml +
+        '</div>'
+      );
+    }
+
+    // ── 일반 글 답글 ───────────────────────────────────
+    function getNode(path) {
+      var parts = path.split('.');
+      var docId = parts[0];
+      var node = getPostById(docId);
+      for (var i = 1; i < parts.length; i++) node = node.replies[Number(parts[i])];
+      return { node: node, docId: docId };
+    }
+
+    function submitReply(path) {
+      var ta = document.getElementById('reply-input-' + path);
+      var text = ta.value.trim();
+      if (!text) return;
+      var result = getNode(path);
+      result.node.replies.push({ content: text, time: now(), replies: [] });
+      ta.value = '';
+      savePost(result.docId);
+    }
+
+    function toggleReplyBox(path) {
+      var box = document.getElementById('reply-box-' + path);
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function attachAllReplyKeydowns(nodes) {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].type === 'thread') continue;
+        attachReplyKeydownsRecursive(nodes[i].replies, nodes[i].id);
+      }
+    }
+
+    function attachReplyKeydownsRecursive(replies, parentPath) {
+      for (var i = 0; i < replies.length; i++) {
+        var path = parentPath + '.' + i;
+        var ta = document.getElementById('reply-input-' + path);
+        if (ta) onEnterSubmit(ta, (function(p){ return function(){ submitReply(p); }; })(path));
+        if (replies[i].replies && replies[i].replies.length > 0) {
+          attachReplyKeydownsRecursive(replies[i].replies, path);
+        }
+      }
+    }
+
+    // ── 스레드 상세 뷰 ─────────────────────────────────
+    function openThread(id) {
+      currentThreadId = id;
+      var p = getPostById(id);
+      document.getElementById('tv-title').textContent = p.title;
+      document.getElementById('tv-time').textContent = p.time;
+      document.getElementById('tv-content').innerHTML = nl2br(p.content);
+      document.getElementById('main-view').style.display = 'none';
+      document.getElementById('thread-view').style.display = 'block';
+      renderThreadComments();
+
+      var tvInput = document.getElementById('tv-input');
+      tvInput.onkeydown = null;
+      onEnterSubmit(tvInput, submitThreadComment);
+    }
+
+    function goBack() {
+      currentThreadId = null;
+      document.getElementById('thread-view').style.display = 'none';
+      document.getElementById('main-view').style.display = 'block';
+      renderPosts();
+    }
+
+    function submitThreadComment() {
+      var ta = document.getElementById('tv-input');
+      var text = ta.value.trim();
+      if (!text) return;
+      var post = getPostById(currentThreadId);
+      post.comments.push({ content: text, time: now(), replies: [] });
+      ta.value = '';
+      savePost(currentThreadId);
+    }
+
+    function getThreadCommentNode(path) {
+      var parts = path.split('.').map(Number);
+      var post = getPostById(currentThreadId);
+      var node = post.comments[parts[0]];
+      for (var i = 1; i < parts.length; i++) node = node.replies[parts[i]];
+      return node;
+    }
+
+    function submitThreadReply(path) {
+      var ta = document.getElementById('thread-reply-input-' + path);
+      var text = ta.value.trim();
+      if (!text) return;
+      getThreadCommentNode(path).replies.push({ content: text, time: now(), replies: [] });
+      ta.value = '';
+      savePost(currentThreadId);
+    }
+
+    function toggleThreadReplyBox(path) {
+      var box = document.getElementById('thread-reply-box-' + path);
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function renderThreadCommentNode(node, path, depth) {
+      var indent = depth * 16;
+      var border = depth > 0 ? 'border-left:2px solid #999; padding-left:8px;' : '';
+      var prefix = depth > 0 ? '↳ ' : '';
+      var repliesHtml = '';
+      for (var i = 0; i < node.replies.length; i++) {
+        repliesHtml += renderThreadCommentNode(node.replies[i], path + '.' + i, depth + 1);
+      }
+      return (
+        '<div style="margin-left:' + indent + 'px;' + border + '">' +
+        '<p style="margin:4px 0;">' + prefix + nl2br(node.content) + '</p>' +
+        '<small>' + node.time + '</small> &nbsp;' +
+        '<button onclick="toggleThreadReplyBox(\'' + path + '\')">답글</button>' +
+        '<div id="thread-reply-box-' + path + '" style="display:none;margin-top:4px;">' +
+        '<textarea id="thread-reply-input-' + path + '" rows="2" cols="45" placeholder="답글 입력 후 Enter / Shift+Enter로 줄바꿈"></textarea><br>' +
+        '<button onclick="submitThreadReply(\'' + path + '\')">등록</button>' +
+        '</div>' +
+        repliesHtml +
+        '</div>'
+      );
+    }
+
+    function renderThreadComments() {
+      var post = getPostById(currentThreadId);
+      if (!post) return;
+      var comments = post.comments;
+      var div = document.getElementById('tv-comments');
+      if (comments.length === 0) { div.innerHTML = '<p>댓글이 없습니다.</p>'; return; }
+      var html = '';
+      for (var i = 0; i < comments.length; i++) {
+        html += renderThreadCommentNode(comments[i], String(i), 0) + '<hr>';
+      }
+      div.innerHTML = html;
+      attachAllThreadReplyKeydowns(comments, '');
+    }
+
+    function attachAllThreadReplyKeydowns(nodes, parentPath) {
+      for (var i = 0; i < nodes.length; i++) {
+        var path = parentPath === '' ? String(i) : parentPath + '.' + i;
+        var ta = document.getElementById('thread-reply-input-' + path);
+        if (ta) onEnterSubmit(ta, (function(p){ return function(){ submitThreadReply(p); }; })(path));
+        if (nodes[i].replies && nodes[i].replies.length > 0) {
+          attachAllThreadReplyKeydowns(nodes[i].replies, path);
+        }
+      }
+    }
+  </script>
+
+</body>
+</html>
