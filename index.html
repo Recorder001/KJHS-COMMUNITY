@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>공주고 기숙사생 커뮤니티</title>
+  <title>공주고등학교 기숙사생 커뮤니티</title>
 </head>
 <body>
 
@@ -222,6 +222,20 @@
       document.getElementById('form-thread').style.display  = type === 'thread'  ? 'block' : 'none';
     }
 
+    // ── 게시글 번호 채번 (트랜잭션) ───────────────────
+    function getNextPostNum(callback) {
+      var counterRef = db.collection('counters').doc('posts');
+      db.runTransaction(function(transaction) {
+        return transaction.get(counterRef).then(function(doc) {
+          var next = doc.exists ? doc.data().count + 1 : 1;
+          transaction.set(counterRef, { count: next });
+          return next;
+        });
+      }).then(function(num) {
+        callback(num);
+      });
+    }
+
     // ── IP / 기기 정보 수집 ────────────────────────────
     var cachedIP = null;
     function getClientInfo(callback) {
@@ -267,15 +281,17 @@
       var text = ta.value.trim();
       if (!text) return;
       ta.value = '';
-      getClientInfo(function(info) {
-        db.collection('posts').add({
-          type: 'general',
-          content: text,
-          time: now(),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          replies: [],
-          _ip: info.ip,
-          _ua: info.ua
+      getNextPostNum(function(num) {
+        getClientInfo(function(info) {
+          db.collection('posts').doc(String(num)).set({
+            type: 'general',
+            content: text,
+            time: now(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            replies: [],
+            _ip: info.ip,
+            _ua: info.ua
+          });
         });
       });
     }
@@ -287,16 +303,18 @@
       if (!title || !content) { alert('제목과 본문을 모두 입력해주세요.'); return; }
       document.getElementById('thread-title').value = '';
       document.getElementById('thread-content').value = '';
-      getClientInfo(function(info) {
-        db.collection('posts').add({
-          type: 'thread',
-          title: title,
-          content: content,
-          time: now(),
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          comments: [],
-          _ip: info.ip,
-          _ua: info.ua
+      getNextPostNum(function(num) {
+        getClientInfo(function(info) {
+          db.collection('posts').doc(String(num)).set({
+            type: 'thread',
+            title: title,
+            content: content,
+            time: now(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            comments: [],
+            _ip: info.ip,
+            _ua: info.ua
+          });
         });
       });
     }
