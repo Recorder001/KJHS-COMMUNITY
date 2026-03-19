@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>공주고등학교 기숙사생 커뮤니티</title>
+  <title>공주고 기숙사생 커뮤니티</title>
 </head>
 <body>
 
@@ -14,7 +14,7 @@
   <!-- ========== 메인 뷰 ========== -->
   <div id="main-view">
     <h1>공주고등학교 기숙사생 커뮤니티</h1>
-    <p style="margin:4px 0; color:#555;">저격 금지!! 건전하게 쓰셈, 삭제 불가능!! 신중히 작성하셈 &nbsp;|&nbsp; 관리자: 3506노재민</p>
+    <p style="margin:4px 0; color:#555;">저격 금지, 삭제 금지!! 신중하게 쓰셈 &nbsp;|&nbsp; 관리자: 3506노재민</p>
     <hr>
 
     <h2>글 작성</h2>
@@ -49,19 +49,25 @@
     <div id="pagination" style="margin:12px 0;"></div>
 
     <hr>
-    <h3>검색</h3>
-    <select id="search-field">
-      <option value="title">제목</option>
-      <option value="title_content">제목+내용</option>
-      <option value="content">내용</option>
-    </select>
-    &nbsp;
-    <input type="text" id="search-input" size="30" placeholder="검색어 입력">
-    &nbsp;
-    <button onclick="doSearch()">검색</button>
-    <button onclick="clearSearch()">초기화</button>
-    <div id="search-result-info" style="margin-top:6px; color:#555;"></div>
+    <div style="text-align:center;">
+      <h3>검색</h3>
+      <select id="search-field">
+        <option value="title">제목</option>
+        <option value="title_content">제목+내용</option>
+        <option value="content">내용</option>
+      </select>
+      &nbsp;
+      <input type="text" id="search-input" size="30" placeholder="검색어 입력">
+      &nbsp;
+      <button onclick="doSearch()">검색</button>
+      <button onclick="clearSearch()">초기화</button>
+      <div id="search-result-info" style="margin-top:6px; color:#555;"></div>
+    </div>
   </div>
+
+  <footer style="text-align:center; margin:24px 0 12px; color:#aaa;">
+    <small>커뮤니티 이용 시 IP가 수집될 수 있습니다.</small>
+  </footer>
 
   <!-- ========== 스레드 상세 뷰 ========== -->
   <div id="thread-view" style="display:none;">
@@ -216,6 +222,22 @@
       document.getElementById('form-thread').style.display  = type === 'thread'  ? 'block' : 'none';
     }
 
+    // ── IP / 기기 정보 수집 ────────────────────────────
+    var cachedIP = null;
+    function getClientInfo(callback) {
+      var ua = navigator.userAgent;
+      if (cachedIP) { callback({ ip: cachedIP, ua: ua }); return; }
+      fetch('https://api.ipify.org?format=json')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          cachedIP = data.ip;
+          callback({ ip: cachedIP, ua: ua });
+        })
+        .catch(function() {
+          callback({ ip: '수집실패', ua: ua });
+        });
+    }
+
     // ── 유틸 ───────────────────────────────────────────
     function now() {
       var d = new Date();
@@ -245,12 +267,16 @@
       var text = ta.value.trim();
       if (!text) return;
       ta.value = '';
-      db.collection('posts').add({
-        type: 'general',
-        content: text,
-        time: now(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        replies: []
+      getClientInfo(function(info) {
+        db.collection('posts').add({
+          type: 'general',
+          content: text,
+          time: now(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          replies: [],
+          _ip: info.ip,
+          _ua: info.ua
+        });
       });
     }
 
@@ -261,13 +287,17 @@
       if (!title || !content) { alert('제목과 본문을 모두 입력해주세요.'); return; }
       document.getElementById('thread-title').value = '';
       document.getElementById('thread-content').value = '';
-      db.collection('posts').add({
-        type: 'thread',
-        title: title,
-        content: content,
-        time: now(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        comments: []
+      getClientInfo(function(info) {
+        db.collection('posts').add({
+          type: 'thread',
+          title: title,
+          content: content,
+          time: now(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          comments: [],
+          _ip: info.ip,
+          _ua: info.ua
+        });
       });
     }
 
