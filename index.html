@@ -6,9 +6,15 @@
 </head>
 <body>
 
+  <!-- ========== 공지 배너 ========== -->
+  <div id="notice-banner" style="display:none; background:#fff3cd; border:1px solid #ffc107; padding:10px 16px; margin-bottom:8px;">
+    <b>📢 공지:</b> <span id="notice-text"></span>
+  </div>
+
   <!-- ========== 메인 뷰 ========== -->
   <div id="main-view">
     <h1>공주고등학교 커뮤니티</h1>
+    <p style="margin:4px 0; color:#555;">저격 금지!! 건전하게 쓰셈. &nbsp;|&nbsp; 관리자: 3506노재민</p>
     <hr>
 
     <h2>글 작성</h2>
@@ -79,6 +85,18 @@
 
     var posts = [];
     var currentThreadId = null;
+
+    // ── 공지 배너 실시간 동기화 ───────────────────────
+    db.collection('notices').doc('current').onSnapshot(function(doc) {
+      var banner = document.getElementById('notice-banner');
+      var text = document.getElementById('notice-text');
+      if (doc.exists && doc.data().message && doc.data().message.trim()) {
+        text.textContent = doc.data().message;
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
+    });
 
     // ── Firestore 실시간 동기화 ────────────────────────
     db.collection('posts').orderBy('createdAt', 'desc').onSnapshot(function(snapshot) {
