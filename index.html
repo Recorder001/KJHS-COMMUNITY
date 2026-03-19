@@ -46,6 +46,21 @@
     <hr>
     <h2>게시글 목록</h2>
     <div id="post-list"><p>불러오는 중...</p></div>
+    <div id="pagination" style="margin:12px 0;"></div>
+
+    <hr>
+    <h3>검색</h3>
+    <select id="search-field">
+      <option value="title">제목</option>
+      <option value="title_content">제목+내용</option>
+      <option value="content">내용</option>
+    </select>
+    &nbsp;
+    <input type="text" id="search-input" size="30" placeholder="검색어 입력">
+    &nbsp;
+    <button onclick="doSearch()">검색</button>
+    <button onclick="clearSearch()">초기화</button>
+    <div id="search-result-info" style="margin-top:6px; color:#555;"></div>
   </div>
 
   <!-- ========== 스레드 상세 뷰 ========== -->
@@ -70,7 +85,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 
   <script>
-    // ★ Firebase 콘솔에서 복사한 설정을 아래에 붙여넣으세요
     const firebaseConfig = {
       apiKey: "AIzaSyDDCDjePP-Kv5G3_gW1hyQXzZ51zq93Ego",
       authDomain: "kongjuhs-community.firebaseapp.com",
@@ -85,6 +99,10 @@
 
     var posts = [];
     var currentThreadId = null;
+    var currentPage = 1;
+    var postsPerPage = 30;
+    var searchQuery = '';
+    var searchField = 'title';
 
     // ── 공지 배너 실시간 동기화 ───────────────────────
     db.collection('notices').doc('current').onSnapshot(function(doc) {
@@ -124,6 +142,71 @@
       var data = Object.assign({}, post);
       delete data.id;
       db.collection('posts').doc(postId).set(data);
+    }
+
+    // ── 검색 필터 ──────────────────────────────────────
+    function getFilteredPosts() {
+      if (!searchQuery) return posts;
+      var q = searchQuery.toLowerCase();
+      return posts.filter(function(p) {
+        var titleMatch = p.type === 'thread' && p.title && p.title.toLowerCase().indexOf(q) !== -1;
+        var contentMatch = p.content && p.content.toLowerCase().indexOf(q) !== -1;
+        if (searchField === 'title') return titleMatch;
+        if (searchField === 'content') return contentMatch;
+        return titleMatch || contentMatch; // title_content
+      });
+    }
+
+    function doSearch() {
+      searchQuery = document.getElementById('search-input').value.trim();
+      searchField = document.getElementById('search-field').value;
+      currentPage = 1;
+      renderPosts();
+    }
+
+    function clearSearch() {
+      searchQuery = '';
+      document.getElementById('search-input').value = '';
+      currentPage = 1;
+      renderPosts();
+    }
+
+    document.getElementById('search-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doSearch();
+    });
+
+    // ── 페이지네이션 ───────────────────────────────────
+    function renderPagination(totalPages) {
+      var div = document.getElementById('pagination');
+      if (totalPages <= 1) { div.innerHTML = ''; return; }
+
+      var startPage = Math.max(1, currentPage - 4);
+      var endPage = Math.min(totalPages, startPage + 9);
+
+      var html = '';
+      html += '<button onclick="goToPage(' + (currentPage - 1) + ')"' + (currentPage === 1 ? ' disabled' : '') + '>◀</button> ';
+      for (var i = startPage; i <= endPage; i++) {
+        html += '<button onclick="goToPage(' + i + ')"' + (i === currentPage ? ' style="font-weight:bold;text-decoration:underline;"' : '') + '>' + i + '</button> ';
+      }
+      html += '<button onclick="goToPage(' + (currentPage + 1) + ')"' + (currentPage === totalPages ? ' disabled' : '') + '>▶</button>';
+      html += ' &nbsp; <input type="number" id="page-jump" min="1" max="' + totalPages + '" value="' + currentPage + '" style="width:45px">';
+      html += ' <button onclick="goToPageInput()">이동</button>';
+      html += ' <small style="color:#888;">/ 총 ' + totalPages + '페이지</small>';
+      div.innerHTML = html;
+    }
+
+    function goToPage(n) {
+      var filtered = getFilteredPosts();
+      var totalPages = Math.max(1, Math.ceil(filtered.length / postsPerPage));
+      if (n < 1 || n > totalPages) return;
+      currentPage = n;
+      renderPosts();
+      window.scrollTo(0, 0);
+    }
+
+    function goToPageInput() {
+      var input = document.getElementById('page-jump');
+      if (input) goToPage(parseInt(input.value) || 1);
     }
 
     // ── 타입 전환 ──────────────────────────────────────
@@ -190,37 +273,65 @@
 
     // ── 메인 목록 렌더링 ───────────────────────────────
     function renderPosts() {
+      var filtered = getFilteredPosts();
+      var totalPosts = posts.length;
+      var totalFiltered = filtered.length;
+      var totalPages = Math.max(1, Math.ceil(totalFiltered / postsPerPage));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      var start = (currentPage - 1) * postsPerPage;
+      var end = Math.min(start + postsPerPage, totalFiltered);
+      var pagePosts = filtered.slice(start, end);
+
+      var infoDiv = document.getElementById('search-result-info');
+      if (searchQuery) {
+        infoDiv.textContent = '"' + searchQuery + '" 검색 결과: ' + totalFiltered + '개';
+      } else {
+        infoDiv.textContent = '';
+      }
+
       var list = document.getElementById('post-list');
-      if (posts.length === 0) { list.innerHTML = '<p>등록된 게시글이 없습니다.</p>'; return; }
+      if (totalFiltered === 0) {
+        list.innerHTML = searchQuery ? '<p>검색 결과가 없습니다.</p>' : '<p>등록된 게시글이 없습니다.</p>';
+        renderPagination(totalPages);
+        return;
+      }
+
       var html = '';
-      for (var i = 0; i < posts.length; i++) {
-        var p = posts[i];
+      for (var i = 0; i < pagePosts.length; i++) {
+        var p = pagePosts[i];
+        var originalIndex = posts.indexOf(p);
+        var postNum = totalPosts - originalIndex;
+
         if (p.type === 'thread') {
           html +=
             '<div>' +
+            '<small style="color:#888;">[' + postNum + ']</small> ' +
             '<b>[스레드]</b> <a href="#" onclick="openThread(\'' + p.id + '\');return false;">' + esc(p.title) + '</a>' +
             ' &nbsp;<small>' + p.time + ' · 댓글 ' + p.comments.length + '개</small>' +
             '<hr></div>';
         } else {
-          html += renderGeneralNode(p, p.id, 0) + '<hr>';
+          html += renderGeneralNode(p, p.id, 0, postNum) + '<hr>';
         }
       }
       list.innerHTML = html;
-      attachAllReplyKeydowns(posts);
+      attachAllReplyKeydowns(pagePosts);
+      renderPagination(totalPages);
     }
 
     // ── 일반 글 노드 렌더링 (재귀) ─────────────────────
-    function renderGeneralNode(node, path, depth) {
+    function renderGeneralNode(node, path, depth, postNum) {
       var indent = depth * 16;
       var border = depth > 0 ? 'border-left:2px solid #999; padding-left:8px;' : '';
       var prefix = depth > 0 ? '↳ ' : '';
+      var numHtml = (depth === 0 && postNum !== undefined) ? '<small style="color:#888;">[' + postNum + ']</small> ' : '';
       var repliesHtml = '';
       for (var i = 0; i < node.replies.length; i++) {
         repliesHtml += renderGeneralNode(node.replies[i], path + '.' + i, depth + 1);
       }
       return (
         '<div style="margin-left:' + indent + 'px;' + border + '">' +
-        '<p style="margin:4px 0;">' + prefix + nl2br(node.content) + '</p>' +
+        '<p style="margin:4px 0;">' + numHtml + prefix + nl2br(node.content) + '</p>' +
         '<small>' + node.time + '</small> &nbsp;' +
         '<button onclick="toggleReplyBox(\'' + path + '\')">답글</button>' +
         '<div id="reply-box-' + path + '" style="display:none;margin-top:4px;">' +
